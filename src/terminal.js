@@ -10,6 +10,8 @@ export function createTerminal(onSubmit) {
   const formEl = document.getElementById("terminal-form");
   const inputEl = document.getElementById("terminal-input");
   const providerEl = document.getElementById("provider-select");
+  const providerApiKeyContainerEl = document.getElementById("api-key-container");
+  const providerApiKeyInputEl = document.getElementById("provider-api-key");
   const statusEl = document.getElementById("terminal-status");
   const submitButton = formEl.querySelector("button[type='submit']");
 
@@ -86,6 +88,42 @@ export function createTerminal(onSubmit) {
     });
   }
 
+  function setApiKeyRequirement(required, providerLabel) {
+    if (
+      !(providerApiKeyContainerEl instanceof HTMLElement) ||
+      !(providerApiKeyInputEl instanceof HTMLInputElement)
+    ) {
+      return;
+    }
+
+    if (!required) {
+      providerApiKeyContainerEl.classList.add("hidden");
+      providerApiKeyContainerEl.classList.remove("flex");
+      providerApiKeyInputEl.value = "";
+      return;
+    }
+
+    providerApiKeyContainerEl.classList.remove("hidden");
+    providerApiKeyContainerEl.classList.add("flex");
+    providerApiKeyInputEl.placeholder = `Paste ${providerLabel} API key`;
+  }
+
+  function getApiKey() {
+    if (!(providerApiKeyInputEl instanceof HTMLInputElement)) {
+      return "";
+    }
+
+    return providerApiKeyInputEl.value.trim();
+  }
+
+  function setApiKey(value) {
+    if (!(providerApiKeyInputEl instanceof HTMLInputElement)) {
+      return;
+    }
+
+    providerApiKeyInputEl.value = value;
+  }
+
   function showThinking() {
     hideThinking();
     thinkingLine = createLine("text-slate-500 italic", "< Thinking...");
@@ -103,6 +141,10 @@ export function createTerminal(onSubmit) {
   function disableInput(disabled) {
     inputEl.disabled = disabled;
     submitButton.disabled = disabled;
+    providerEl.disabled = disabled;
+    if (providerApiKeyInputEl instanceof HTMLInputElement) {
+      providerApiKeyInputEl.disabled = disabled;
+    }
   }
 
   function focusInput() {
@@ -140,6 +182,9 @@ export function createTerminal(onSubmit) {
     setProviders,
     getSelectedProvider,
     onProviderChange,
+    setApiKeyRequirement,
+    getApiKey,
+    setApiKey,
     setStatus,
     disableInput,
     focusInput,

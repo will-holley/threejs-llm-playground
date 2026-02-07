@@ -12,18 +12,20 @@ const terminalResizeHandleEl = document.getElementById("terminal-resize-handle")
 const sceneContext = createScene(sceneContainer);
 const history = [];
 const providerById = new Map();
+const runtimeApiKeys = new Map();
 const sceneStateStack = [
   { code: null, parentIndex: null, viewState: sceneContext.captureViewState() }
 ];
 const revertActionEntries = [];
 let activeStateIndex = 0;
+let activeProviderId = "";
 let isBusy = false;
 
 const terminal = createTerminal(handleSubmit);
 setupTerminalResize();
 terminal.disableInput(true);
 terminal.addAssistantMessage(
-  "Scene ready. Configure providers in .env and send a prompt to mutate the world."
+  "Scene ready. Select Codex or Claude Code, then send a prompt to mutate the world."
 );
 
 function clamp(value, min, max) {
@@ -114,16 +116,51 @@ async function initializeProviders() {
   const providers = payload.providers || [];
   const selected = payload.defaultProvider || providers[0]?.id || "";
 
+  providerById.clear();
   providers.forEach((provider) => {
     providerById.set(provider.id, provider);
   });
 
   terminal.setProviders(providers, selected);
-  terminal.setStatus(
-    selected
-      ? `Using ${providerById.get(selected)?.label || selected}`
-      : "No provider available"
-  );
+  updateProviderControls(selected, { rememberPreviousProviderKey: false });
+}
+
+function getProviderStatusText(provider) {
+  if (!provider) {
+    return "No provider available";
+  }
+
+  return provider.envConfigured
+    ? `Using ${provider.label}`
+    : `Using ${provider.label} (API key required)`;
+}
+
+function updateProviderControls(
+  providerId,
+  { rememberPreviousProviderKey = true } = {}
+) {
+  if (rememberPreviousProviderKey && activeProviderId) {
+    const previousProvider = providerById.get(activeProviderId);
+    if (previousProvider && !previousProvider.envConfigured) {
+      runtimeApiKeys.set(activeProviderId, terminal.getApiKey());
+    }
+  }
+
+  activeProviderId = providerId;
+  const provider = providerById.get(providerId);
+  if (!provider) {
+    terminal.setApiKeyRequirement(false, "");
+    terminal.setStatus("No provider available");
+    return;
+  }
+
+  const requiresRuntimeKey = !provider.envConfigured;
+  terminal.setApiKeyRequirement(requiresRuntimeKey, provider.label);
+  if (requiresRuntimeKey) {
+    terminal.setApiKey(runtimeApiKeys.get(provider.id) || "");
+  }
+
+  terminal.setStatus(getProviderStatusText(provider));
 }
 
 function appendHistory(role, content) {
@@ -254,6 +291,30 @@ async function handleSubmit(message) {
   terminal.showThinking();
 
   const provider = terminal.getSelectedProvider();
+  const selectedProviderConfig = providerById.get(provider);
+  if (!selectedProviderConfig) {
+    terminal.hideThinking();
+    terminal.addError("Select a provider before sending.");
+    isBusy = false;
+    terminal.disableInput(false);
+    terminal.focusInput();
+    return;
+  }
+
+  const apiKey = selectedProviderConfig.envConfigured ? "" : terminal.getApiKey();
+  if (!selectedProviderConfig.envConfigured && !apiKey) {
+    terminal.hideThinking();
+    terminal.addError(`Paste a ${selectedProviderConfig.label} API key before sending.`);
+    isBusy = false;
+    terminal.disableInput(false);
+    terminal.focusInput();
+    return;
+  }
+
+  if (apiKey) {
+    runtimeApiKeys.set(provider, apiKey);
+  }
+
   const screenshot = captureSceneScreenshot();
   if (!screenshot) {
     terminal.hideThinking();
@@ -265,7 +326,7 @@ async function handleSubmit(message) {
   }
 
   try {
-    const result = await sendMessage(message, history, provider, screenshot);
+    const result = await sendMessage(message, history, provider, screenshot, apiKey);
     const responseText = result.response || "";
     const code = extractCode(responseText);
 
@@ -303,8 +364,7 @@ async function handleSubmit(message) {
       terminal.addAssistantMessage(responseText || "No code block returned.");
     }
 
-    const providerLabel = providerById.get(result.provider)?.label || result.provider;
-    terminal.setStatus(`Using ${providerLabel}`);
+    updateProviderControls(result.provider, { rememberPreviousProviderKey: false });
   } catch (error) {
     terminal.hideThinking();
     const errorText = error instanceof Error ? error.message : "Unknown error.";
@@ -317,8 +377,7 @@ async function handleSubmit(message) {
 }
 
 terminal.onProviderChange((providerId) => {
-  const label = providerById.get(providerId)?.label || providerId;
-  terminal.setStatus(`Using ${label}`);
+  updateProviderControls(providerId);
 });
 
 initializeProviders()

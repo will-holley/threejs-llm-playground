@@ -4,7 +4,7 @@ Single-page Vite app with:
 - `75%` Three.js viewport
 - `25%` chat-style terminal
 
-Type natural language prompts to mutate a live 3D scene through Anthropic or OpenAI.
+Type natural language prompts to mutate a live 3D scene through Codex or Claude Code.
 
 ## Quick Start
 
@@ -20,9 +20,11 @@ pnpm install
 cp .env.example .env
 ```
 
-Set at least one API key in `.env`:
+Optionally set one or both API keys in `.env`:
 - `ANTHROPIC_API_KEY=...`
 - `OPENAI_API_KEY=...`
+
+If a provider key is not set in `.env`, the UI will prompt for it at runtime and send it with each request.
 
 3. Start development server:
 
@@ -45,9 +47,9 @@ Successful scene updates include a revert icon in the terminal; hover to see the
 
 ## How It Works
 
-- Frontend sends `{ message, history, provider, screenshot }` to `POST /api/chat`.
+- Frontend sends `{ message, history, provider, screenshot, apiKey }` to `POST /api/chat`.
 - Frontend captures the latest scene screenshot on each send and includes it in `POST /api/chat`.
-- Backend calls Anthropic SDK or Codex SDK (for OpenAI) and returns its response.
+- Backend calls Anthropic SDK (Claude Code) or Codex SDK and returns the response.
 - Frontend extracts fenced JavaScript code blocks from the response.
 - Extracted code executes with a constrained context:
   - `scene`
@@ -67,10 +69,10 @@ The scene loop invokes `userData.update(time)` each frame with error protection.
 
 ## Provider Notes
 
-- Anthropic model: `claude-opus-4-6`
-- OpenAI model via Codex SDK: `gpt-5.2-codex`
+- Claude Code model: `claude-opus-4-6`
+- Codex model: `gpt-5.2-codex`
 
-If both keys are set, both providers appear in the dropdown.
+Both providers always appear in the dropdown. If the selected provider has no env key, the terminal header shows an API-key input.
 
 ## Production
 

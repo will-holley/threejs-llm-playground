@@ -20,7 +20,7 @@ export async function fetchProviders() {
   return parseJsonResponse(response);
 }
 
-export async function sendMessage(message, history, provider, screenshot) {
+export async function sendMessage(message, history, provider, screenshot, apiKey) {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: {
@@ -30,7 +30,8 @@ export async function sendMessage(message, history, provider, screenshot) {
       message,
       history,
       provider,
-      screenshot
+      screenshot,
+      apiKey
     })
   });
 

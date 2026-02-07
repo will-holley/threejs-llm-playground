@@ -25,16 +25,22 @@ const clients = {
   codex: null
 };
 
-const providerConfig = {};
-
-if (process.env.ANTHROPIC_API_KEY) {
-  clients.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  providerConfig.anthropic = {
-    id: "anthropic",
-    label: "Claude Opus 4.6",
-    model: "claude-opus-4-6"
-  };
-}
+const providerCatalog = {
+  codex: {
+    id: "codex",
+    label: "Codex",
+    type: "codex",
+    model: "gpt-5.2-codex",
+    envVar: "OPENAI_API_KEY"
+  },
+  "claude-code": {
+    id: "claude-code",
+    label: "Claude Code",
+    type: "anthropic",
+    model: "claude-opus-4-6",
+    envVar: "ANTHROPIC_API_KEY"
+  }
+};
 
 if (process.env.OPENAI_API_KEY) {
   const codexOptions = {
@@ -46,21 +52,26 @@ if (process.env.OPENAI_API_KEY) {
   }
 
   clients.codex = new Codex(codexOptions);
-  providerConfig.openai = {
-    id: "openai",
-    label: "Codex SDK (GPT-5.2)",
-    model: "gpt-5.2-codex"
-  };
 }
 
-const availableProviders = Object.values(providerConfig);
-const defaultProvider = availableProviders[0]?.id || null;
+if (process.env.ANTHROPIC_API_KEY) {
+  clients.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+}
 
-if (!defaultProvider) {
-  console.error(
-    "No API keys found. Set ANTHROPIC_API_KEY and/or OPENAI_API_KEY in .env before starting."
+const availableProviders = Object.values(providerCatalog).map((provider) => ({
+  id: provider.id,
+  label: provider.label,
+  envConfigured: Boolean(process.env[provider.envVar])
+}));
+const defaultProvider =
+  availableProviders.find((provider) => provider.envConfigured)?.id ||
+  availableProviders[0]?.id ||
+  null;
+
+if (!availableProviders.some((provider) => provider.envConfigured)) {
+  console.warn(
+    "No API keys found in environment. Requests must include a provider API key."
   );
-  process.exit(1);
 }
 
 const systemPrompt = [
@@ -181,14 +192,44 @@ async function writeScreenshotToTempFile(screenshot) {
   return tempPath;
 }
 
-async function callCodex(message, history, screenshot) {
+function resolveApiKey(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim();
+}
+
+function getCodexClient(apiKey) {
+  if (apiKey === process.env.OPENAI_API_KEY && clients.codex) {
+    return clients.codex;
+  }
+
+  const codexOptions = { apiKey };
+  if (process.env.OPENAI_BASE_URL) {
+    codexOptions.baseUrl = process.env.OPENAI_BASE_URL;
+  }
+
+  return new Codex(codexOptions);
+}
+
+function getAnthropicClient(apiKey) {
+  if (apiKey === process.env.ANTHROPIC_API_KEY && clients.anthropic) {
+    return clients.anthropic;
+  }
+
+  return new Anthropic({ apiKey });
+}
+
+async function callCodex(message, history, screenshot, apiKey) {
   let screenshotFilePath = null;
   if (screenshot) {
     screenshotFilePath = await writeScreenshotToTempFile(screenshot);
   }
 
-  const thread = clients.codex.startThread({
-    model: providerConfig.openai.model,
+  const client = getCodexClient(apiKey);
+  const thread = client.startThread({
+    model: providerCatalog.codex.model,
     approvalPolicy: "never",
     sandboxMode: "read-only",
     workingDirectory: __dirname,
@@ -230,9 +271,10 @@ async function callCodex(message, history, screenshot) {
   }
 }
 
-async function callAnthropic(message, history, screenshot) {
-  const response = await clients.anthropic.messages.create({
-    model: providerConfig.anthropic.model,
+async function callAnthropic(message, history, screenshot, apiKey) {
+  const client = getAnthropicClient(apiKey);
+  const response = await client.messages.create({
+    model: providerCatalog["claude-code"].model,
     system: systemPrompt,
     max_tokens: 1200,
     messages: toAnthropicMessages(history, message, screenshot)
@@ -253,7 +295,7 @@ app.get("/api/providers", (_req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { message, history, provider, screenshot } = req.body || {};
+  const { message, history, provider, screenshot, apiKey } = req.body || {};
 
   if (typeof message !== "string" || message.trim().length === 0) {
     res.status(400).json({ error: "Request body must include a non-empty `message`." });
@@ -261,8 +303,19 @@ app.post("/api/chat", async (req, res) => {
   }
 
   const selectedProvider = provider || defaultProvider;
-  if (!providerConfig[selectedProvider]) {
+  const selectedProviderConfig = providerCatalog[selectedProvider];
+  if (!selectedProviderConfig) {
     res.status(400).json({ error: `Provider '${selectedProvider}' is not available.` });
+    return;
+  }
+
+  const envApiKey = resolveApiKey(process.env[selectedProviderConfig.envVar]);
+  const requestApiKey = resolveApiKey(apiKey);
+  const resolvedApiKey = envApiKey || requestApiKey;
+  if (!resolvedApiKey) {
+    res.status(400).json({
+      error: `No API key configured for ${selectedProviderConfig.label}. Set ${selectedProviderConfig.envVar} in .env or provide apiKey in the request.`
+    });
     return;
   }
 
@@ -277,10 +330,15 @@ app.post("/api/chat", async (req, res) => {
 
   try {
     let responseText = "";
-    if (selectedProvider === "anthropic") {
-      responseText = await callAnthropic(message.trim(), history, parsedScreenshot);
+    if (selectedProviderConfig.type === "anthropic") {
+      responseText = await callAnthropic(
+        message.trim(),
+        history,
+        parsedScreenshot,
+        resolvedApiKey
+      );
     } else {
-      responseText = await callCodex(message.trim(), history, parsedScreenshot);
+      responseText = await callCodex(message.trim(), history, parsedScreenshot, resolvedApiKey);
     }
 
     res.json({
