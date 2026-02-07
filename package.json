@@ -1,0 +1,25 @@
+{
+  "name": "tianjin-threejs-llm-playground",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.5.2",
+  "type": "module",
+  "scripts": {
+    "dev": "NODE_ENV=development nodemon --watch server.js --ext js,mjs,cjs,json --exec node server.js",
+    "build": "vite build",
+    "preview": "NODE_ENV=production node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "@openai/codex-sdk": "^0.98.0",
+    "dotenv": "latest",
+    "express": "latest",
+    "three": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "latest",
+    "nodemon": "^3.1.10",
+    "tailwindcss": "latest",
+    "vite": "latest"
+  }
+}

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Three.js LLM Playground</title>
+  </head>
+  <body class="h-screen overflow-hidden bg-slate-950 text-slate-100 antialiased">
+    <div id="app" class="flex h-screen flex-col">
+      <section id="viewport" class="min-h-0 flex-1 border-b border-slate-800 bg-slate-900">
+        <div id="scene-container" class="h-full w-full"></div>
+      </section>
+
+      <section id="terminal" class="flex h-[25vh] min-h-56 flex-col bg-slate-950">
+        <div
+          id="terminal-resize-handle"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize terminal"
+        ></div>
+        <div class="flex items-center gap-3 border-b border-slate-800 px-4 py-2">
+          <label for="provider-select" class="text-xs uppercase tracking-wide text-slate-400">
+            Provider
+          </label>
+          <select
+            id="provider-select"
+            class="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-cyan-500 focus:outline-none"
+          ></select>
+          <span id="terminal-status" class="text-xs text-slate-500">Loading providers...</span>
+        </div>
+
+        <div id="terminal-log" class="flex-1 overflow-y-auto px-4 py-3 font-mono text-sm"></div>
+
+        <form id="terminal-form" class="flex gap-2 border-t border-slate-800 p-3">
+          <input
+            id="terminal-input"
+            type="text"
+            autocomplete="off"
+            placeholder="Describe a scene change..."
+            class="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-cyan-500 focus:outline-none"
+          />
+          <button
+            type="submit"
+            class="rounded bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+          >
+            Send
+          </button>
+        </form>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
