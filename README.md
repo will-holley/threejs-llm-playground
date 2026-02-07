@@ -1,4 +1,4 @@
-## Tianjin: Three.js LLM Playground
+## Three.js LLM Playground
 
 Single-page Vite app with:
 - `75%` Three.js viewport
