@@ -33,7 +33,7 @@ pnpm dev
 ```
 
 Open `http://localhost:4000`.
-Backend changes to `server.js` are hot reloaded automatically in dev mode.
+Backend changes under `server.js`, `backend/`, and `api/` are hot reloaded automatically in dev mode.
 
 ## Usage
 
@@ -49,7 +49,7 @@ Successful scene updates include a revert icon in the terminal; hover to see the
 
 - Frontend sends `{ message, history, provider, screenshot, apiKey }` to `POST /api/chat`.
 - Frontend captures the latest scene screenshot on each send and includes it in `POST /api/chat`.
-- Backend calls Anthropic SDK (Claude Code) or Codex SDK and returns the response.
+- Backend calls Anthropic SDK (Claude Code) or OpenAI Responses API (Codex) and returns the response.
 - Frontend extracts fenced JavaScript code blocks from the response.
 - Extracted code executes with a constrained context:
   - `scene`
@@ -70,7 +70,7 @@ The scene loop invokes `userData.update(time)` each frame with error protection.
 ## Provider Notes
 
 - Claude Code model: `claude-opus-4-6`
-- Codex model: `gpt-5.2-codex`
+- Codex model via Responses API: `gpt-5.2-codex`
 
 Both providers always appear in the dropdown. If the selected provider has no env key, the terminal header shows an API-key input.
 
@@ -89,3 +89,12 @@ pnpm preview
 ```
 
 This serves static files from `dist/` plus API routes.
+
+## Vercel Deployment
+
+- Frontend is built by Vite from `dist/`.
+- API endpoints are exposed through Vercel Functions in `api/chat.js` and `api/providers.js`.
+- Set environment variables in Vercel Preview and Production:
+  - `ANTHROPIC_API_KEY`
+  - `OPENAI_API_KEY`
+  - `OPENAI_BASE_URL` (optional)
