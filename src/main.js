@@ -1,6 +1,6 @@
 import "./style.css";
 
-import { fetchProviders, sendMessage } from "./api";
+import { fetchProviders, sendMessage, validateApiKey } from "./api";
 import { executeCode, extractCode, stripCodeBlocks } from "./executor";
 import { createScene } from "./scene";
 import { createTerminal } from "./terminal";
@@ -9,22 +9,81 @@ const appEl = document.getElementById("app");
 const sceneContainer = document.getElementById("scene-container");
 const terminalEl = document.getElementById("terminal");
 const terminalResizeHandleEl = document.getElementById("terminal-resize-handle");
+const API_KEY_STORAGE_KEY = "threejs-llm-playground.validated-api-keys.v1";
 const sceneContext = createScene(sceneContainer);
 const history = [];
 const providerById = new Map();
+const runtimeApiKeys = new Map();
+const validatedApiKeys = new Map();
 const sceneStateStack = [
   { code: null, parentIndex: null, viewState: sceneContext.captureViewState() }
 ];
 const revertActionEntries = [];
 let activeStateIndex = 0;
+let activeProviderId = "";
+let apiKeyValidationRequestId = 0;
 let isBusy = false;
+
+hydrateStoredApiKeys();
 
 const terminal = createTerminal(handleSubmit);
 setupTerminalResize();
 terminal.disableInput(true);
 terminal.addAssistantMessage(
-  "Scene ready. Configure providers in .env and send a prompt to mutate the world."
+  "Scene ready. Select Codex or Claude Code, then send a prompt to mutate the world."
 );
+
+function hydrateStoredApiKeys() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+
+    for (const [providerId, apiKeyValue] of Object.entries(parsed)) {
+      if (typeof providerId !== "string" || typeof apiKeyValue !== "string") {
+        continue;
+      }
+
+      const normalizedKey = apiKeyValue.trim();
+      if (!normalizedKey) {
+        continue;
+      }
+
+      runtimeApiKeys.set(providerId, normalizedKey);
+      validatedApiKeys.set(providerId, normalizedKey);
+    }
+  } catch {
+    // Ignore malformed local storage payloads and continue without persisted keys.
+  }
+}
+
+function syncValidatedApiKeysToStorage() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    const payload = {};
+    for (const [providerId, apiKeyValue] of validatedApiKeys.entries()) {
+      if (typeof providerId === "string" && typeof apiKeyValue === "string" && apiKeyValue) {
+        payload[providerId] = apiKeyValue;
+      }
+    }
+    window.localStorage.setItem(API_KEY_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage write failures (e.g. quota or browser restrictions).
+  }
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -114,16 +173,98 @@ async function initializeProviders() {
   const providers = payload.providers || [];
   const selected = payload.defaultProvider || providers[0]?.id || "";
 
+  providerById.clear();
   providers.forEach((provider) => {
     providerById.set(provider.id, provider);
   });
 
   terminal.setProviders(providers, selected);
-  terminal.setStatus(
-    selected
-      ? `Using ${providerById.get(selected)?.label || selected}`
-      : "No provider available"
-  );
+  updateProviderControls(selected, { rememberPreviousProviderKey: false });
+}
+
+function getProviderStatusText(provider) {
+  if (!provider) {
+    return "No provider available";
+  }
+
+  return provider.envConfigured
+    ? `Using ${provider.label}`
+    : `Using ${provider.label} (API key required)`;
+}
+
+function updateProviderControls(
+  providerId,
+  { rememberPreviousProviderKey = true } = {}
+) {
+  apiKeyValidationRequestId += 1;
+
+  if (rememberPreviousProviderKey && activeProviderId) {
+    const previousProvider = providerById.get(activeProviderId);
+    if (previousProvider && !previousProvider.envConfigured) {
+      runtimeApiKeys.set(activeProviderId, terminal.getApiKey());
+    }
+  }
+
+  activeProviderId = providerId;
+  const provider = providerById.get(providerId);
+  if (!provider) {
+    terminal.setApiKeyRequirement(false, "");
+    terminal.setApiKeyClearVisible(false);
+    terminal.setStatus("No provider available");
+    return;
+  }
+
+  const requiresRuntimeKey = !provider.envConfigured;
+  terminal.setApiKeyRequirement(requiresRuntimeKey, provider.label);
+  if (requiresRuntimeKey) {
+    const savedKey = runtimeApiKeys.get(provider.id) || "";
+    terminal.setApiKey(savedKey);
+    terminal.setApiKeyClearVisible(Boolean(savedKey));
+    if (savedKey && validatedApiKeys.get(provider.id) === savedKey) {
+      terminal.setApiKeyValidationState("valid");
+    }
+  }
+
+  terminal.setStatus(getProviderStatusText(provider));
+}
+
+async function validateSelectedProviderKey() {
+  const providerId = terminal.getSelectedProvider();
+  const provider = providerById.get(providerId);
+  if (!provider || provider.envConfigured) {
+    return;
+  }
+
+  const apiKey = terminal.getApiKey();
+  if (!apiKey) {
+    terminal.setApiKeyValidationState("hidden");
+    validatedApiKeys.delete(providerId);
+    return;
+  }
+
+  const requestId = ++apiKeyValidationRequestId;
+  terminal.setApiKeyValidationState("checking");
+
+  try {
+    await validateApiKey(providerId, apiKey);
+    if (requestId !== apiKeyValidationRequestId) {
+      return;
+    }
+
+    runtimeApiKeys.set(providerId, apiKey);
+    validatedApiKeys.set(providerId, apiKey);
+    syncValidatedApiKeysToStorage();
+    terminal.setApiKeyValidationState("valid");
+  } catch (error) {
+    if (requestId !== apiKeyValidationRequestId) {
+      return;
+    }
+
+    validatedApiKeys.delete(providerId);
+    terminal.setApiKeyValidationState("invalid");
+    const errorText = error instanceof Error ? error.message : "API key validation failed.";
+    terminal.showErrorToast(errorText);
+  }
 }
 
 function appendHistory(role, content) {
@@ -254,6 +395,30 @@ async function handleSubmit(message) {
   terminal.showThinking();
 
   const provider = terminal.getSelectedProvider();
+  const selectedProviderConfig = providerById.get(provider);
+  if (!selectedProviderConfig) {
+    terminal.hideThinking();
+    terminal.addError("Select a provider before sending.");
+    isBusy = false;
+    terminal.disableInput(false);
+    terminal.focusInput();
+    return;
+  }
+
+  const apiKey = selectedProviderConfig.envConfigured ? "" : terminal.getApiKey();
+  if (!selectedProviderConfig.envConfigured && !apiKey) {
+    terminal.hideThinking();
+    terminal.addError(`Paste a ${selectedProviderConfig.label} API key before sending.`);
+    isBusy = false;
+    terminal.disableInput(false);
+    terminal.focusInput();
+    return;
+  }
+
+  if (apiKey) {
+    runtimeApiKeys.set(provider, apiKey);
+  }
+
   const screenshot = captureSceneScreenshot();
   if (!screenshot) {
     terminal.hideThinking();
@@ -265,7 +430,7 @@ async function handleSubmit(message) {
   }
 
   try {
-    const result = await sendMessage(message, history, provider, screenshot);
+    const result = await sendMessage(message, history, provider, screenshot, apiKey);
     const responseText = result.response || "";
     const code = extractCode(responseText);
 
@@ -303,8 +468,7 @@ async function handleSubmit(message) {
       terminal.addAssistantMessage(responseText || "No code block returned.");
     }
 
-    const providerLabel = providerById.get(result.provider)?.label || result.provider;
-    terminal.setStatus(`Using ${providerLabel}`);
+    updateProviderControls(result.provider, { rememberPreviousProviderKey: false });
   } catch (error) {
     terminal.hideThinking();
     const errorText = error instanceof Error ? error.message : "Unknown error.";
@@ -317,8 +481,58 @@ async function handleSubmit(message) {
 }
 
 terminal.onProviderChange((providerId) => {
-  const label = providerById.get(providerId)?.label || providerId;
-  terminal.setStatus(`Using ${label}`);
+  updateProviderControls(providerId);
+});
+
+terminal.onApiKeyInput(() => {
+  const providerId = terminal.getSelectedProvider();
+  const provider = providerById.get(providerId);
+  if (!provider || provider.envConfigured) {
+    return;
+  }
+
+  apiKeyValidationRequestId += 1;
+  const apiKey = terminal.getApiKey();
+  runtimeApiKeys.set(providerId, apiKey);
+  if (!apiKey) {
+    runtimeApiKeys.delete(providerId);
+    validatedApiKeys.delete(providerId);
+    syncValidatedApiKeysToStorage();
+    terminal.setApiKeyValidationState("hidden");
+    terminal.setApiKeyClearVisible(false);
+    return;
+  }
+
+  if (validatedApiKeys.get(providerId) === apiKey) {
+    terminal.setApiKeyValidationState("valid");
+    return;
+  }
+
+  terminal.setApiKeyValidationState("hidden");
+  terminal.setApiKeyClearVisible(true);
+});
+
+terminal.onApiKeyPaste(() => {
+  // Wait for input value to include pasted content.
+  window.setTimeout(() => {
+    validateSelectedProviderKey();
+  }, 0);
+});
+
+terminal.onApiKeyClear(() => {
+  const providerId = terminal.getSelectedProvider();
+  if (!providerId) {
+    return;
+  }
+
+  apiKeyValidationRequestId += 1;
+  runtimeApiKeys.delete(providerId);
+  validatedApiKeys.delete(providerId);
+  syncValidatedApiKeysToStorage();
+
+  terminal.setApiKey("");
+  terminal.setApiKeyValidationState("hidden");
+  terminal.setApiKeyClearVisible(false);
 });
 
 initializeProviders()

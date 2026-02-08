@@ -20,7 +20,7 @@ export async function fetchProviders() {
   return parseJsonResponse(response);
 }
 
-export async function sendMessage(message, history, provider, screenshot) {
+export async function sendMessage(message, history, provider, screenshot, apiKey) {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: {
@@ -30,7 +30,23 @@ export async function sendMessage(message, history, provider, screenshot) {
       message,
       history,
       provider,
-      screenshot
+      screenshot,
+      apiKey
+    })
+  });
+
+  return parseJsonResponse(response);
+}
+
+export async function validateApiKey(provider, apiKey) {
+  const response = await fetch("/api/validate-key", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      provider,
+      apiKey
     })
   });
 

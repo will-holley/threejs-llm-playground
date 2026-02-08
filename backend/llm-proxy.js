@@ -1,9 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-const NO_PROVIDERS_ERROR =
-  "No API keys found. Set ANTHROPIC_API_KEY and/or OPENAI_API_KEY in environment variables.";
+const NO_PROVIDERS_WARNING =
+  "No API keys found in environment. Requests must include a provider API key.";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
 
 const systemPrompt = [
   "You are a Three.js scene command assistant.",
@@ -27,31 +29,45 @@ function createRuntimeState() {
     anthropic: null
   };
 
-  const providerConfig = {};
+  const providerCatalog = {
+    codex: {
+      id: "codex",
+      label: "Codex",
+      type: "openai",
+      model: "gpt-5.2-codex",
+      envVar: "OPENAI_API_KEY"
+    },
+    "claude-code": {
+      id: "claude-code",
+      label: "Claude Code",
+      type: "anthropic",
+      model: "claude-opus-4-6",
+      envVar: "ANTHROPIC_API_KEY"
+    }
+  };
 
   if (process.env.ANTHROPIC_API_KEY) {
     clients.anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    providerConfig.anthropic = {
-      id: "anthropic",
-      label: "Claude Opus 4.6",
-      model: "claude-opus-4-6"
-    };
   }
 
-  if (process.env.OPENAI_API_KEY) {
-    providerConfig.openai = {
-      id: "openai",
-      label: "OpenAI (GPT-5.2 Codex)",
-      model: "gpt-5.2-codex"
-    };
-  }
+  const availableProviders = Object.values(providerCatalog).map((provider) => ({
+    id: provider.id,
+    label: provider.label,
+    envConfigured: Boolean(process.env[provider.envVar])
+  }));
 
-  const availableProviders = Object.values(providerConfig);
-  const defaultProvider = availableProviders[0]?.id || null;
+  const defaultProvider =
+    availableProviders.find((provider) => provider.envConfigured)?.id ||
+    availableProviders[0]?.id ||
+    null;
+
+  if (!availableProviders.some((provider) => provider.envConfigured)) {
+    console.warn(NO_PROVIDERS_WARNING);
+  }
 
   return {
     clients,
-    providerConfig,
+    providerCatalog,
     availableProviders,
     defaultProvider
   };
@@ -169,6 +185,20 @@ function getOpenAIResponsesUrl() {
   return `${normalizedBaseUrl}/v1/responses`;
 }
 
+function getAnthropicModelsUrl() {
+  const configuredBaseUrl =
+    typeof process.env.ANTHROPIC_BASE_URL === "string" && process.env.ANTHROPIC_BASE_URL.trim()
+      ? process.env.ANTHROPIC_BASE_URL.trim()
+      : DEFAULT_ANTHROPIC_BASE_URL;
+
+  const normalizedBaseUrl = configuredBaseUrl.replace(/\/+$/, "");
+  if (normalizedBaseUrl.endsWith("/v1")) {
+    return `${normalizedBaseUrl}/models`;
+  }
+
+  return `${normalizedBaseUrl}/v1/models`;
+}
+
 function extractOpenAIText(responsePayload) {
   if (!responsePayload || typeof responsePayload !== "object") {
     return "";
@@ -206,7 +236,67 @@ function extractOpenAIText(responsePayload) {
   return textParts.join("\n\n").trim();
 }
 
-async function callOpenAI(message, history, screenshot, runtime) {
+function resolveApiKey(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim();
+}
+
+function getAnthropicClient(runtime, apiKey) {
+  if (apiKey === process.env.ANTHROPIC_API_KEY && runtime.clients.anthropic) {
+    return runtime.clients.anthropic;
+  }
+
+  return new Anthropic({ apiKey });
+}
+
+function getOpenAIModelsUrl() {
+  const responsesUrl = getOpenAIResponsesUrl();
+  return responsesUrl.replace(/\/responses$/, "/models");
+}
+
+async function validateOpenAIKey(apiKey) {
+  const response = await fetch(getOpenAIModelsUrl(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    }
+  });
+
+  const responsePayload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const upstreamMessage =
+      typeof responsePayload?.error?.message === "string"
+        ? responsePayload.error.message
+        : `OpenAI request failed with status ${response.status}.`;
+
+    throw new Error(upstreamMessage);
+  }
+}
+
+async function validateAnthropicKey(apiKey) {
+  const response = await fetch(getAnthropicModelsUrl(), {
+    method: "GET",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": DEFAULT_ANTHROPIC_VERSION
+    }
+  });
+
+  const responsePayload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const upstreamMessage =
+      typeof responsePayload?.error?.message === "string"
+        ? responsePayload.error.message
+        : `Anthropic request failed with status ${response.status}.`;
+
+    throw new Error(upstreamMessage);
+  }
+}
+
+async function callOpenAI(message, history, screenshot, model, apiKey) {
   const userContent = [
     {
       type: "input_text",
@@ -224,11 +314,11 @@ async function callOpenAI(message, history, screenshot, runtime) {
   const response = await fetch(getOpenAIResponsesUrl(), {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: runtime.providerConfig.openai.model,
+      model,
       input: [
         {
           role: "user",
@@ -251,9 +341,10 @@ async function callOpenAI(message, history, screenshot, runtime) {
   return extractOpenAIText(responsePayload);
 }
 
-async function callAnthropic(message, history, screenshot, runtime) {
-  const response = await runtime.clients.anthropic.messages.create({
-    model: runtime.providerConfig.anthropic.model,
+async function callAnthropic(message, history, screenshot, model, runtime, apiKey) {
+  const client = getAnthropicClient(runtime, apiKey);
+  const response = await client.messages.create({
+    model,
     system: systemPrompt,
     max_tokens: 1200,
     messages: toAnthropicMessages(history, message, screenshot)
@@ -300,32 +391,12 @@ async function parseRequestJsonBody(req) {
   }
 }
 
-function getConfiguredRuntime() {
-  const runtime = getRuntimeState();
-  if (!runtime.defaultProvider) {
-    return {
-      error: NO_PROVIDERS_ERROR
-    };
-  }
-
-  return {
-    runtime
-  };
-}
-
 export function assertProviderConfiguration() {
-  const { error } = getConfiguredRuntime();
-  if (error) {
-    throw new Error(error);
-  }
+  getRuntimeState();
 }
 
 export function providersHandler(_req, res) {
-  const { runtime, error } = getConfiguredRuntime();
-  if (error) {
-    sendJson(res, 500, { error });
-    return;
-  }
+  const runtime = getRuntimeState();
 
   sendJson(res, 200, {
     providers: runtime.availableProviders,
@@ -333,12 +404,8 @@ export function providersHandler(_req, res) {
   });
 }
 
-export async function chatHandler(req, res) {
-  const { runtime, error } = getConfiguredRuntime();
-  if (error) {
-    sendJson(res, 500, { error });
-    return;
-  }
+export async function validateKeyHandler(req, res) {
+  const runtime = getRuntimeState();
 
   const requestBody = await parseRequestJsonBody(req);
   if (!requestBody || typeof requestBody !== "object") {
@@ -346,7 +413,49 @@ export async function chatHandler(req, res) {
     return;
   }
 
-  const { message, history, provider, screenshot } = requestBody;
+  const providerId = typeof requestBody.provider === "string" ? requestBody.provider : "";
+  const apiKey = resolveApiKey(requestBody.apiKey);
+  if (!providerId) {
+    sendJson(res, 400, { error: "Request body must include `provider`." });
+    return;
+  }
+
+  if (!apiKey) {
+    sendJson(res, 400, { error: "Request body must include a non-empty `apiKey`." });
+    return;
+  }
+
+  const selectedProviderConfig = runtime.providerCatalog[providerId];
+  if (!selectedProviderConfig) {
+    sendJson(res, 400, { error: `Provider '${providerId}' is not available.` });
+    return;
+  }
+
+  try {
+    if (selectedProviderConfig.type === "anthropic") {
+      await validateAnthropicKey(apiKey);
+    } else {
+      await validateOpenAIKey(apiKey);
+    }
+
+    sendJson(res, 200, { provider: providerId, valid: true });
+  } catch (requestError) {
+    const messageText =
+      requestError instanceof Error ? requestError.message : "API key validation failed.";
+    sendJson(res, 400, { error: messageText });
+  }
+}
+
+export async function chatHandler(req, res) {
+  const runtime = getRuntimeState();
+
+  const requestBody = await parseRequestJsonBody(req);
+  if (!requestBody || typeof requestBody !== "object") {
+    sendJson(res, 400, { error: "Request body must be valid JSON." });
+    return;
+  }
+
+  const { message, history, provider, screenshot, apiKey } = requestBody;
 
   if (typeof message !== "string" || message.trim().length === 0) {
     sendJson(res, 400, { error: "Request body must include a non-empty `message`." });
@@ -354,9 +463,20 @@ export async function chatHandler(req, res) {
   }
 
   const selectedProvider = provider || runtime.defaultProvider;
-  if (!runtime.providerConfig[selectedProvider]) {
+  const selectedProviderConfig = runtime.providerCatalog[selectedProvider];
+  if (!selectedProviderConfig) {
     sendJson(res, 400, {
       error: `Provider '${selectedProvider}' is not available.`
+    });
+    return;
+  }
+
+  const envApiKey = resolveApiKey(process.env[selectedProviderConfig.envVar]);
+  const requestApiKey = resolveApiKey(apiKey);
+  const resolvedApiKey = envApiKey || requestApiKey;
+  if (!resolvedApiKey) {
+    sendJson(res, 400, {
+      error: `No API key configured for ${selectedProviderConfig.label}. Set ${selectedProviderConfig.envVar} in .env or provide apiKey in the request.`
     });
     return;
   }
@@ -372,10 +492,23 @@ export async function chatHandler(req, res) {
 
   try {
     let responseText = "";
-    if (selectedProvider === "anthropic") {
-      responseText = await callAnthropic(message.trim(), history, parsedScreenshot, runtime);
+    if (selectedProviderConfig.type === "anthropic") {
+      responseText = await callAnthropic(
+        message.trim(),
+        history,
+        parsedScreenshot,
+        selectedProviderConfig.model,
+        runtime,
+        resolvedApiKey
+      );
     } else {
-      responseText = await callOpenAI(message.trim(), history, parsedScreenshot, runtime);
+      responseText = await callOpenAI(
+        message.trim(),
+        history,
+        parsedScreenshot,
+        selectedProviderConfig.model,
+        resolvedApiKey
+      );
     }
 
     sendJson(res, 200, {

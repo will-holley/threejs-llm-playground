@@ -10,10 +10,16 @@ export function createTerminal(onSubmit) {
   const formEl = document.getElementById("terminal-form");
   const inputEl = document.getElementById("terminal-input");
   const providerEl = document.getElementById("provider-select");
+  const providerApiKeyContainerEl = document.getElementById("api-key-container");
+  const providerApiKeyInputEl = document.getElementById("provider-api-key");
+  const apiKeyValidationEl = document.getElementById("api-key-validation");
+  const apiKeyClearButtonEl = document.getElementById("api-key-clear");
   const statusEl = document.getElementById("terminal-status");
   const submitButton = formEl.querySelector("button[type='submit']");
 
   let thinkingLine = null;
+  let activeToastEl = null;
+  let activeToastTimeoutId = null;
 
   function scrollToBottom() {
     logEl.scrollTop = logEl.scrollHeight;
@@ -86,6 +92,147 @@ export function createTerminal(onSubmit) {
     });
   }
 
+  function setApiKeyRequirement(required, providerLabel) {
+    if (
+      !(providerApiKeyContainerEl instanceof HTMLElement) ||
+      !(providerApiKeyInputEl instanceof HTMLInputElement)
+    ) {
+      return;
+    }
+
+    if (!required) {
+      providerApiKeyContainerEl.classList.add("hidden");
+      providerApiKeyContainerEl.classList.remove("flex");
+      providerApiKeyInputEl.value = "";
+      setApiKeyValidationState("hidden");
+      setApiKeyClearVisible(false);
+      return;
+    }
+
+    providerApiKeyContainerEl.classList.remove("hidden");
+    providerApiKeyContainerEl.classList.add("flex");
+    providerApiKeyInputEl.placeholder = `Paste ${providerLabel} API key`;
+    setApiKeyValidationState("hidden");
+    setApiKeyClearVisible(getApiKey().length > 0);
+  }
+
+  function getApiKey() {
+    if (!(providerApiKeyInputEl instanceof HTMLInputElement)) {
+      return "";
+    }
+
+    return providerApiKeyInputEl.value.trim();
+  }
+
+  function setApiKey(value) {
+    if (!(providerApiKeyInputEl instanceof HTMLInputElement)) {
+      return;
+    }
+
+    providerApiKeyInputEl.value = value;
+    setApiKeyValidationState("hidden");
+    setApiKeyClearVisible(getApiKey().length > 0);
+  }
+
+  function setApiKeyClearVisible(visible) {
+    if (!(apiKeyClearButtonEl instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    if (visible) {
+      apiKeyClearButtonEl.classList.remove("hidden");
+      return;
+    }
+
+    apiKeyClearButtonEl.classList.add("hidden");
+  }
+
+  function setApiKeyValidationState(state) {
+    if (!(apiKeyValidationEl instanceof HTMLElement)) {
+      return;
+    }
+
+    apiKeyValidationEl.classList.remove("hidden", "text-emerald-400", "text-rose-400", "text-slate-400");
+    if (state === "hidden") {
+      apiKeyValidationEl.textContent = "";
+      apiKeyValidationEl.classList.add("hidden");
+      return;
+    }
+
+    if (state === "checking") {
+      apiKeyValidationEl.textContent = "Checking...";
+      apiKeyValidationEl.classList.add("text-slate-400");
+      return;
+    }
+
+    if (state === "valid") {
+      apiKeyValidationEl.textContent = "✓";
+      apiKeyValidationEl.classList.add("text-emerald-400");
+      return;
+    }
+
+    apiKeyValidationEl.textContent = "✕";
+    apiKeyValidationEl.classList.add("text-rose-400");
+  }
+
+  function onApiKeyPaste(callback) {
+    if (!(providerApiKeyInputEl instanceof HTMLInputElement)) {
+      return;
+    }
+
+    providerApiKeyInputEl.addEventListener("paste", callback);
+  }
+
+  function onApiKeyInput(callback) {
+    if (!(providerApiKeyInputEl instanceof HTMLInputElement)) {
+      return;
+    }
+
+    providerApiKeyInputEl.addEventListener("input", (event) => {
+      setApiKeyClearVisible(getApiKey().length > 0);
+      callback(event);
+    });
+  }
+
+  function onApiKeyClear(callback) {
+    if (!(apiKeyClearButtonEl instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    apiKeyClearButtonEl.addEventListener("click", callback);
+  }
+
+  function showErrorToast(message) {
+    if (!(document.body instanceof HTMLBodyElement)) {
+      return;
+    }
+
+    if (activeToastEl) {
+      activeToastEl.remove();
+      activeToastEl = null;
+    }
+
+    if (activeToastTimeoutId) {
+      clearTimeout(activeToastTimeoutId);
+      activeToastTimeoutId = null;
+    }
+
+    const toast = document.createElement("div");
+    toast.className =
+      "fixed bottom-4 right-4 z-50 max-w-sm rounded border border-rose-500/60 bg-rose-950 px-3 py-2 text-sm text-rose-100 shadow-lg";
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    activeToastEl = toast;
+
+    activeToastTimeoutId = window.setTimeout(() => {
+      if (activeToastEl) {
+        activeToastEl.remove();
+        activeToastEl = null;
+      }
+      activeToastTimeoutId = null;
+    }, 4200);
+  }
+
   function showThinking() {
     hideThinking();
     thinkingLine = createLine("text-slate-500 italic", "< Thinking...");
@@ -103,6 +250,13 @@ export function createTerminal(onSubmit) {
   function disableInput(disabled) {
     inputEl.disabled = disabled;
     submitButton.disabled = disabled;
+    providerEl.disabled = disabled;
+    if (providerApiKeyInputEl instanceof HTMLInputElement) {
+      providerApiKeyInputEl.disabled = disabled;
+    }
+    if (apiKeyClearButtonEl instanceof HTMLButtonElement) {
+      apiKeyClearButtonEl.disabled = disabled;
+    }
   }
 
   function focusInput() {
@@ -140,6 +294,15 @@ export function createTerminal(onSubmit) {
     setProviders,
     getSelectedProvider,
     onProviderChange,
+    setApiKeyRequirement,
+    getApiKey,
+    setApiKey,
+    setApiKeyValidationState,
+    setApiKeyClearVisible,
+    onApiKeyPaste,
+    onApiKeyInput,
+    onApiKeyClear,
+    showErrorToast,
     setStatus,
     disableInput,
     focusInput,
