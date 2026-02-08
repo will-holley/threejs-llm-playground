@@ -11,9 +11,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: latest
         version: 0.74.0
-      '@openai/codex-sdk':
-        specifier: ^0.98.0
-        version: 0.98.0
       dotenv:
         specifier: latest
         version: 17.2.4
@@ -223,10 +220,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@openai/codex-sdk@0.98.0':
-    resolution: {integrity: sha512-TbPgrBpuSNMJyOXys0HNsh6UoP5VIHu1fVh2KDdACi5XyB0vuPtzBZC+qOsxHz7WXEQPFlomPLyxS6JnE5Okmg==}
-    engines: {node: '>=18'}
 
   '@rollup/rollup-android-arm-eabi@4.57.1':
     resolution: {integrity: sha512-A6ehUVSiSaaliTxai040ZpZ2zTevHYbvu/lDoeAteHI8QnaosIzm4qwtezfRg1jOYaUmnzLX1AOD6Z+UJjtifg==}
@@ -1104,8 +1097,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@openai/codex-sdk@0.98.0': {}
 
   '@rollup/rollup-android-arm-eabi@4.57.1':
     optional: true
