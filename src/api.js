@@ -37,3 +37,18 @@ export async function sendMessage(message, history, provider, screenshot, apiKey
 
   return parseJsonResponse(response);
 }
+
+export async function validateApiKey(provider, apiKey) {
+  const response = await fetch("/api/validate-key", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      provider,
+      apiKey
+    })
+  });
+
+  return parseJsonResponse(response);
+}

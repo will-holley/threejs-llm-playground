@@ -7,7 +7,8 @@ import { createServer as createViteServer } from "vite";
 import {
   assertProviderConfiguration,
   chatHandler,
-  providersHandler
+  providersHandler,
+  validateKeyHandler
 } from "./backend/llm-proxy.js";
 
 dotenv.config();
@@ -21,6 +22,7 @@ const app = express();
 app.use(express.json({ limit: "6mb" }));
 app.get("/api/providers", providersHandler);
 app.post("/api/chat", chatHandler);
+app.post("/api/validate-key", validateKeyHandler);
 
 async function start() {
   assertProviderConfiguration();

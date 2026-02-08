@@ -236,6 +236,45 @@ function getAnthropicClient(runtime, apiKey) {
   return new Anthropic({ apiKey });
 }
 
+async function validateOpenAIKey(model, apiKey) {
+  const response = await fetch(getOpenAIResponsesUrl(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      max_output_tokens: 1,
+      input: [
+        {
+          role: "user",
+          content: [{ type: "input_text", text: "ping" }]
+        }
+      ]
+    })
+  });
+
+  const responsePayload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const upstreamMessage =
+      typeof responsePayload?.error?.message === "string"
+        ? responsePayload.error.message
+        : `OpenAI request failed with status ${response.status}.`;
+
+    throw new Error(upstreamMessage);
+  }
+}
+
+async function validateAnthropicKey(model, runtime, apiKey) {
+  const client = getAnthropicClient(runtime, apiKey);
+  await client.messages.create({
+    model,
+    max_tokens: 1,
+    messages: [{ role: "user", content: "ping" }]
+  });
+}
+
 async function callOpenAI(message, history, screenshot, model, apiKey) {
   const userContent = [
     {
@@ -342,6 +381,48 @@ export function providersHandler(_req, res) {
     providers: runtime.availableProviders,
     defaultProvider: runtime.defaultProvider
   });
+}
+
+export async function validateKeyHandler(req, res) {
+  const runtime = getRuntimeState();
+
+  const requestBody = await parseRequestJsonBody(req);
+  if (!requestBody || typeof requestBody !== "object") {
+    sendJson(res, 400, { error: "Request body must be valid JSON." });
+    return;
+  }
+
+  const providerId = typeof requestBody.provider === "string" ? requestBody.provider : "";
+  const apiKey = resolveApiKey(requestBody.apiKey);
+  if (!providerId) {
+    sendJson(res, 400, { error: "Request body must include `provider`." });
+    return;
+  }
+
+  if (!apiKey) {
+    sendJson(res, 400, { error: "Request body must include a non-empty `apiKey`." });
+    return;
+  }
+
+  const selectedProviderConfig = runtime.providerCatalog[providerId];
+  if (!selectedProviderConfig) {
+    sendJson(res, 400, { error: `Provider '${providerId}' is not available.` });
+    return;
+  }
+
+  try {
+    if (selectedProviderConfig.type === "anthropic") {
+      await validateAnthropicKey(selectedProviderConfig.model, runtime, apiKey);
+    } else {
+      await validateOpenAIKey(selectedProviderConfig.model, apiKey);
+    }
+
+    sendJson(res, 200, { provider: providerId, valid: true });
+  } catch (requestError) {
+    const messageText =
+      requestError instanceof Error ? requestError.message : "API key validation failed.";
+    sendJson(res, 400, { error: messageText });
+  }
 }
 
 export async function chatHandler(req, res) {

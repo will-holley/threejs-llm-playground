@@ -1,6 +1,6 @@
 import "./style.css";
 
-import { fetchProviders, sendMessage } from "./api";
+import { fetchProviders, sendMessage, validateApiKey } from "./api";
 import { executeCode, extractCode, stripCodeBlocks } from "./executor";
 import { createScene } from "./scene";
 import { createTerminal } from "./terminal";
@@ -13,12 +13,14 @@ const sceneContext = createScene(sceneContainer);
 const history = [];
 const providerById = new Map();
 const runtimeApiKeys = new Map();
+const validatedApiKeys = new Map();
 const sceneStateStack = [
   { code: null, parentIndex: null, viewState: sceneContext.captureViewState() }
 ];
 const revertActionEntries = [];
 let activeStateIndex = 0;
 let activeProviderId = "";
+let apiKeyValidationRequestId = 0;
 let isBusy = false;
 
 const terminal = createTerminal(handleSubmit);
@@ -139,6 +141,8 @@ function updateProviderControls(
   providerId,
   { rememberPreviousProviderKey = true } = {}
 ) {
+  apiKeyValidationRequestId += 1;
+
   if (rememberPreviousProviderKey && activeProviderId) {
     const previousProvider = providerById.get(activeProviderId);
     if (previousProvider && !previousProvider.envConfigured) {
@@ -157,10 +161,52 @@ function updateProviderControls(
   const requiresRuntimeKey = !provider.envConfigured;
   terminal.setApiKeyRequirement(requiresRuntimeKey, provider.label);
   if (requiresRuntimeKey) {
-    terminal.setApiKey(runtimeApiKeys.get(provider.id) || "");
+    const savedKey = runtimeApiKeys.get(provider.id) || "";
+    terminal.setApiKey(savedKey);
+    if (savedKey && validatedApiKeys.get(provider.id) === savedKey) {
+      terminal.setApiKeyValidationState("valid");
+    }
   }
 
   terminal.setStatus(getProviderStatusText(provider));
+}
+
+async function validateSelectedProviderKey() {
+  const providerId = terminal.getSelectedProvider();
+  const provider = providerById.get(providerId);
+  if (!provider || provider.envConfigured) {
+    return;
+  }
+
+  const apiKey = terminal.getApiKey();
+  if (!apiKey) {
+    terminal.setApiKeyValidationState("hidden");
+    validatedApiKeys.delete(providerId);
+    return;
+  }
+
+  const requestId = ++apiKeyValidationRequestId;
+  terminal.setApiKeyValidationState("checking");
+
+  try {
+    await validateApiKey(providerId, apiKey);
+    if (requestId !== apiKeyValidationRequestId) {
+      return;
+    }
+
+    runtimeApiKeys.set(providerId, apiKey);
+    validatedApiKeys.set(providerId, apiKey);
+    terminal.setApiKeyValidationState("valid");
+  } catch (error) {
+    if (requestId !== apiKeyValidationRequestId) {
+      return;
+    }
+
+    validatedApiKeys.delete(providerId);
+    terminal.setApiKeyValidationState("invalid");
+    const errorText = error instanceof Error ? error.message : "API key validation failed.";
+    terminal.showErrorToast(errorText);
+  }
 }
 
 function appendHistory(role, content) {
@@ -378,6 +424,37 @@ async function handleSubmit(message) {
 
 terminal.onProviderChange((providerId) => {
   updateProviderControls(providerId);
+});
+
+terminal.onApiKeyInput(() => {
+  const providerId = terminal.getSelectedProvider();
+  const provider = providerById.get(providerId);
+  if (!provider || provider.envConfigured) {
+    return;
+  }
+
+  apiKeyValidationRequestId += 1;
+  const apiKey = terminal.getApiKey();
+  runtimeApiKeys.set(providerId, apiKey);
+  if (!apiKey) {
+    validatedApiKeys.delete(providerId);
+    terminal.setApiKeyValidationState("hidden");
+    return;
+  }
+
+  if (validatedApiKeys.get(providerId) === apiKey) {
+    terminal.setApiKeyValidationState("valid");
+    return;
+  }
+
+  terminal.setApiKeyValidationState("hidden");
+});
+
+terminal.onApiKeyPaste(() => {
+  // Wait for input value to include pasted content.
+  window.setTimeout(() => {
+    validateSelectedProviderKey();
+  }, 0);
 });
 
 initializeProviders()
