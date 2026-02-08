@@ -209,6 +209,7 @@ function updateProviderControls(
   const provider = providerById.get(providerId);
   if (!provider) {
     terminal.setApiKeyRequirement(false, "");
+    terminal.setApiKeyClearVisible(false);
     terminal.setStatus("No provider available");
     return;
   }
@@ -218,6 +219,7 @@ function updateProviderControls(
   if (requiresRuntimeKey) {
     const savedKey = runtimeApiKeys.get(provider.id) || "";
     terminal.setApiKey(savedKey);
+    terminal.setApiKeyClearVisible(Boolean(savedKey));
     if (savedKey && validatedApiKeys.get(provider.id) === savedKey) {
       terminal.setApiKeyValidationState("valid");
     }
@@ -497,6 +499,7 @@ terminal.onApiKeyInput(() => {
     validatedApiKeys.delete(providerId);
     syncValidatedApiKeysToStorage();
     terminal.setApiKeyValidationState("hidden");
+    terminal.setApiKeyClearVisible(false);
     return;
   }
 
@@ -506,6 +509,7 @@ terminal.onApiKeyInput(() => {
   }
 
   terminal.setApiKeyValidationState("hidden");
+  terminal.setApiKeyClearVisible(true);
 });
 
 terminal.onApiKeyPaste(() => {
@@ -513,6 +517,22 @@ terminal.onApiKeyPaste(() => {
   window.setTimeout(() => {
     validateSelectedProviderKey();
   }, 0);
+});
+
+terminal.onApiKeyClear(() => {
+  const providerId = terminal.getSelectedProvider();
+  if (!providerId) {
+    return;
+  }
+
+  apiKeyValidationRequestId += 1;
+  runtimeApiKeys.delete(providerId);
+  validatedApiKeys.delete(providerId);
+  syncValidatedApiKeysToStorage();
+
+  terminal.setApiKey("");
+  terminal.setApiKeyValidationState("hidden");
+  terminal.setApiKeyClearVisible(false);
 });
 
 initializeProviders()

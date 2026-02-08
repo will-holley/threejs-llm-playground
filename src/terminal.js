@@ -13,6 +13,7 @@ export function createTerminal(onSubmit) {
   const providerApiKeyContainerEl = document.getElementById("api-key-container");
   const providerApiKeyInputEl = document.getElementById("provider-api-key");
   const apiKeyValidationEl = document.getElementById("api-key-validation");
+  const apiKeyClearButtonEl = document.getElementById("api-key-clear");
   const statusEl = document.getElementById("terminal-status");
   const submitButton = formEl.querySelector("button[type='submit']");
 
@@ -104,6 +105,7 @@ export function createTerminal(onSubmit) {
       providerApiKeyContainerEl.classList.remove("flex");
       providerApiKeyInputEl.value = "";
       setApiKeyValidationState("hidden");
+      setApiKeyClearVisible(false);
       return;
     }
 
@@ -111,6 +113,7 @@ export function createTerminal(onSubmit) {
     providerApiKeyContainerEl.classList.add("flex");
     providerApiKeyInputEl.placeholder = `Paste ${providerLabel} API key`;
     setApiKeyValidationState("hidden");
+    setApiKeyClearVisible(getApiKey().length > 0);
   }
 
   function getApiKey() {
@@ -128,6 +131,20 @@ export function createTerminal(onSubmit) {
 
     providerApiKeyInputEl.value = value;
     setApiKeyValidationState("hidden");
+    setApiKeyClearVisible(getApiKey().length > 0);
+  }
+
+  function setApiKeyClearVisible(visible) {
+    if (!(apiKeyClearButtonEl instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    if (visible) {
+      apiKeyClearButtonEl.classList.remove("hidden");
+      return;
+    }
+
+    apiKeyClearButtonEl.classList.add("hidden");
   }
 
   function setApiKeyValidationState(state) {
@@ -171,7 +188,18 @@ export function createTerminal(onSubmit) {
       return;
     }
 
-    providerApiKeyInputEl.addEventListener("input", callback);
+    providerApiKeyInputEl.addEventListener("input", (event) => {
+      setApiKeyClearVisible(getApiKey().length > 0);
+      callback(event);
+    });
+  }
+
+  function onApiKeyClear(callback) {
+    if (!(apiKeyClearButtonEl instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    apiKeyClearButtonEl.addEventListener("click", callback);
   }
 
   function showErrorToast(message) {
@@ -226,6 +254,9 @@ export function createTerminal(onSubmit) {
     if (providerApiKeyInputEl instanceof HTMLInputElement) {
       providerApiKeyInputEl.disabled = disabled;
     }
+    if (apiKeyClearButtonEl instanceof HTMLButtonElement) {
+      apiKeyClearButtonEl.disabled = disabled;
+    }
   }
 
   function focusInput() {
@@ -267,8 +298,10 @@ export function createTerminal(onSubmit) {
     getApiKey,
     setApiKey,
     setApiKeyValidationState,
+    setApiKeyClearVisible,
     onApiKeyPaste,
     onApiKeyInput,
+    onApiKeyClear,
     showErrorToast,
     setStatus,
     disableInput,

@@ -4,6 +4,8 @@ const NO_PROVIDERS_WARNING =
   "No API keys found in environment. Requests must include a provider API key.";
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
+const DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com";
+const DEFAULT_ANTHROPIC_VERSION = "2023-06-01";
 
 const systemPrompt = [
   "You are a Three.js scene command assistant.",
@@ -183,6 +185,20 @@ function getOpenAIResponsesUrl() {
   return `${normalizedBaseUrl}/v1/responses`;
 }
 
+function getAnthropicModelsUrl() {
+  const configuredBaseUrl =
+    typeof process.env.ANTHROPIC_BASE_URL === "string" && process.env.ANTHROPIC_BASE_URL.trim()
+      ? process.env.ANTHROPIC_BASE_URL.trim()
+      : DEFAULT_ANTHROPIC_BASE_URL;
+
+  const normalizedBaseUrl = configuredBaseUrl.replace(/\/+$/, "");
+  if (normalizedBaseUrl.endsWith("/v1")) {
+    return `${normalizedBaseUrl}/models`;
+  }
+
+  return `${normalizedBaseUrl}/v1/models`;
+}
+
 function extractOpenAIText(responsePayload) {
   if (!responsePayload || typeof responsePayload !== "object") {
     return "";
@@ -260,13 +276,24 @@ async function validateOpenAIKey(apiKey) {
   }
 }
 
-async function validateAnthropicKey(model, runtime, apiKey) {
-  const client = getAnthropicClient(runtime, apiKey);
-  await client.messages.create({
-    model,
-    max_tokens: 1,
-    messages: [{ role: "user", content: "ping" }]
+async function validateAnthropicKey(apiKey) {
+  const response = await fetch(getAnthropicModelsUrl(), {
+    method: "GET",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": DEFAULT_ANTHROPIC_VERSION
+    }
   });
+
+  const responsePayload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const upstreamMessage =
+      typeof responsePayload?.error?.message === "string"
+        ? responsePayload.error.message
+        : `Anthropic request failed with status ${response.status}.`;
+
+    throw new Error(upstreamMessage);
+  }
 }
 
 async function callOpenAI(message, history, screenshot, model, apiKey) {
@@ -406,7 +433,7 @@ export async function validateKeyHandler(req, res) {
 
   try {
     if (selectedProviderConfig.type === "anthropic") {
-      await validateAnthropicKey(selectedProviderConfig.model, runtime, apiKey);
+      await validateAnthropicKey(apiKey);
     } else {
       await validateOpenAIKey(apiKey);
     }
