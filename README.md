@@ -1,10 +1,6 @@
 ## Three.js LLM Playground
 
-Single-page Vite app with:
-- `75%` Three.js viewport
-- `25%` chat-style terminal
-
-Type natural language prompts to mutate a live 3D scene through Codex or Claude Code.
+An interactive 3D playground powered by LLMs. Type natural language prompts in a chat-style terminal to create and manipulate objects in a live Three.js scene. Supports both Anthropic (Claude) and OpenAI (Codex) as providers.
 
 ## Quick Start
 
@@ -44,35 +40,6 @@ Try prompts like:
 
 Use the provider dropdown in the terminal header to switch between available models.
 Successful scene updates include a revert icon in the terminal; hover to see the `revert` tooltip and click to restore that stack state.
-
-## How It Works
-
-- Frontend sends `{ message, history, provider, screenshot, apiKey }` to `POST /api/chat`.
-- Frontend captures the latest scene screenshot on each send and includes it in `POST /api/chat`.
-- Backend calls Anthropic SDK (Claude Code) or OpenAI Responses API (Codex) and returns the response.
-- Frontend extracts fenced JavaScript code blocks from the response.
-- Extracted code executes with a constrained context:
-  - `scene`
-  - `THREE`
-  - `camera`
-  - `renderer`
-
-Animation hooks can be attached with:
-
-```js
-mesh.userData.update = (time) => {
-  mesh.rotation.y = time;
-};
-```
-
-The scene loop invokes `userData.update(time)` each frame with error protection.
-
-## Provider Notes
-
-- Claude Code model: `claude-opus-4-6`
-- Codex model via Responses API: `gpt-5.2-codex`
-
-Both providers always appear in the dropdown. If the selected provider has no env key, the terminal header shows an API-key input.
 
 ## Production
 
