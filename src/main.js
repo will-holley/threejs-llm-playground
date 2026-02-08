@@ -9,6 +9,7 @@ const appEl = document.getElementById("app");
 const sceneContainer = document.getElementById("scene-container");
 const terminalEl = document.getElementById("terminal");
 const terminalResizeHandleEl = document.getElementById("terminal-resize-handle");
+const API_KEY_STORAGE_KEY = "threejs-llm-playground.validated-api-keys.v1";
 const sceneContext = createScene(sceneContainer);
 const history = [];
 const providerById = new Map();
@@ -23,12 +24,66 @@ let activeProviderId = "";
 let apiKeyValidationRequestId = 0;
 let isBusy = false;
 
+hydrateStoredApiKeys();
+
 const terminal = createTerminal(handleSubmit);
 setupTerminalResize();
 terminal.disableInput(true);
 terminal.addAssistantMessage(
   "Scene ready. Select Codex or Claude Code, then send a prompt to mutate the world."
 );
+
+function hydrateStoredApiKeys() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return;
+    }
+
+    for (const [providerId, apiKeyValue] of Object.entries(parsed)) {
+      if (typeof providerId !== "string" || typeof apiKeyValue !== "string") {
+        continue;
+      }
+
+      const normalizedKey = apiKeyValue.trim();
+      if (!normalizedKey) {
+        continue;
+      }
+
+      runtimeApiKeys.set(providerId, normalizedKey);
+      validatedApiKeys.set(providerId, normalizedKey);
+    }
+  } catch {
+    // Ignore malformed local storage payloads and continue without persisted keys.
+  }
+}
+
+function syncValidatedApiKeysToStorage() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  try {
+    const payload = {};
+    for (const [providerId, apiKeyValue] of validatedApiKeys.entries()) {
+      if (typeof providerId === "string" && typeof apiKeyValue === "string" && apiKeyValue) {
+        payload[providerId] = apiKeyValue;
+      }
+    }
+    window.localStorage.setItem(API_KEY_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage write failures (e.g. quota or browser restrictions).
+  }
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -196,6 +251,7 @@ async function validateSelectedProviderKey() {
 
     runtimeApiKeys.set(providerId, apiKey);
     validatedApiKeys.set(providerId, apiKey);
+    syncValidatedApiKeysToStorage();
     terminal.setApiKeyValidationState("valid");
   } catch (error) {
     if (requestId !== apiKeyValidationRequestId) {
@@ -437,7 +493,9 @@ terminal.onApiKeyInput(() => {
   const apiKey = terminal.getApiKey();
   runtimeApiKeys.set(providerId, apiKey);
   if (!apiKey) {
+    runtimeApiKeys.delete(providerId);
     validatedApiKeys.delete(providerId);
+    syncValidatedApiKeysToStorage();
     terminal.setApiKeyValidationState("hidden");
     return;
   }

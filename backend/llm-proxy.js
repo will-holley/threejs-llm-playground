@@ -236,23 +236,17 @@ function getAnthropicClient(runtime, apiKey) {
   return new Anthropic({ apiKey });
 }
 
-async function validateOpenAIKey(model, apiKey) {
-  const response = await fetch(getOpenAIResponsesUrl(), {
-    method: "POST",
+function getOpenAIModelsUrl() {
+  const responsesUrl = getOpenAIResponsesUrl();
+  return responsesUrl.replace(/\/responses$/, "/models");
+}
+
+async function validateOpenAIKey(apiKey) {
+  const response = await fetch(getOpenAIModelsUrl(), {
+    method: "GET",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      max_output_tokens: 1,
-      input: [
-        {
-          role: "user",
-          content: [{ type: "input_text", text: "ping" }]
-        }
-      ]
-    })
+      Authorization: `Bearer ${apiKey}`
+    }
   });
 
   const responsePayload = await response.json().catch(() => null);
@@ -414,7 +408,7 @@ export async function validateKeyHandler(req, res) {
     if (selectedProviderConfig.type === "anthropic") {
       await validateAnthropicKey(selectedProviderConfig.model, runtime, apiKey);
     } else {
-      await validateOpenAIKey(selectedProviderConfig.model, apiKey);
+      await validateOpenAIKey(apiKey);
     }
 
     sendJson(res, 200, { provider: providerId, valid: true });
