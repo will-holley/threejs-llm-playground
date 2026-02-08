@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "latest",
-    "@openai/codex-sdk": "^0.98.0",
     "dotenv": "latest",
     "express": "latest",
     "three": "latest"

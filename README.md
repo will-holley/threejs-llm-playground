@@ -47,7 +47,7 @@ Successful scene updates include a revert icon in the terminal; hover to see the
 
 - Frontend sends `{ message, history, provider, screenshot }` to `POST /api/chat`.
 - Frontend captures the latest scene screenshot on each send and includes it in `POST /api/chat`.
-- Backend calls Anthropic SDK or Codex SDK (for OpenAI) and returns its response.
+- Backend calls Anthropic SDK or OpenAI Responses API and returns its response.
 - Frontend extracts fenced JavaScript code blocks from the response.
 - Extracted code executes with a constrained context:
   - `scene`
@@ -68,7 +68,7 @@ The scene loop invokes `userData.update(time)` each frame with error protection.
 ## Provider Notes
 
 - Anthropic model: `claude-opus-4-6`
-- OpenAI model via Codex SDK: `gpt-5.2-codex`
+- OpenAI model via Responses API: `gpt-5.2-codex`
 
 If both keys are set, both providers appear in the dropdown.
 

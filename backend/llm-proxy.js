@@ -1,13 +1,9 @@
-import crypto from "node:crypto";
-import os from "node:os";
-import path from "node:path";
-import { promises as fs } from "node:fs";
-
 import Anthropic from "@anthropic-ai/sdk";
-import { Codex } from "@openai/codex-sdk";
 
 const NO_PROVIDERS_ERROR =
   "No API keys found. Set ANTHROPIC_API_KEY and/or OPENAI_API_KEY in environment variables.";
+
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com";
 
 const systemPrompt = [
   "You are a Three.js scene command assistant.",
@@ -24,18 +20,11 @@ const systemPrompt = [
   "- Keep code concise and executable as-is."
 ].join("\n");
 
-const IMAGE_EXTENSION_BY_MIME = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp"
-};
-
 let cachedRuntime = null;
 
 function createRuntimeState() {
   const clients = {
-    anthropic: null,
-    codex: null
+    anthropic: null
   };
 
   const providerConfig = {};
@@ -50,18 +39,9 @@ function createRuntimeState() {
   }
 
   if (process.env.OPENAI_API_KEY) {
-    const codexOptions = {
-      apiKey: process.env.OPENAI_API_KEY
-    };
-
-    if (process.env.OPENAI_BASE_URL) {
-      codexOptions.baseUrl = process.env.OPENAI_BASE_URL;
-    }
-
-    clients.codex = new Codex(codexOptions);
     providerConfig.openai = {
       id: "openai",
-      label: "Codex SDK (GPT-5.2)",
+      label: "OpenAI (GPT-5.2 Codex)",
       model: "gpt-5.2-codex"
     };
   }
@@ -127,7 +107,7 @@ function normalizeHistory(history) {
     .slice(-20);
 }
 
-function toCodexPrompt(history, message, hasScreenshot) {
+function toOpenAIPrompt(history, message, hasScreenshot) {
   const normalizedHistory = normalizeHistory(history);
   const lines = [
     systemPrompt,
@@ -175,72 +155,95 @@ function toAnthropicMessages(history, message, screenshot) {
   return [...normalizedHistory, { role: "user", content: currentUserContent }];
 }
 
-async function writeScreenshotToTempFile(screenshot) {
-  if (!screenshot) {
-    return null;
-  }
+function getOpenAIResponsesUrl() {
+  const configuredBaseUrl =
+    typeof process.env.OPENAI_BASE_URL === "string" && process.env.OPENAI_BASE_URL.trim()
+      ? process.env.OPENAI_BASE_URL.trim()
+      : DEFAULT_OPENAI_BASE_URL;
 
-  const extension = IMAGE_EXTENSION_BY_MIME[screenshot.mimeType];
-  if (!extension) {
-    throw new Error(`Unsupported screenshot media type: ${screenshot.mimeType}`);
-  }
-
-  const tempPath = path.join(
-    os.tmpdir(),
-    `tianjin-scene-${Date.now()}-${crypto.randomUUID()}.${extension}`
-  );
-
-  await fs.writeFile(tempPath, Buffer.from(screenshot.base64, "base64"));
-  return tempPath;
+  return `${configuredBaseUrl.replace(/\/+$/, "")}/v1/responses`;
 }
 
-async function callCodex(message, history, screenshot, runtime) {
-  let screenshotFilePath = null;
-  if (screenshot) {
-    screenshotFilePath = await writeScreenshotToTempFile(screenshot);
+function extractOpenAIText(responsePayload) {
+  if (!responsePayload || typeof responsePayload !== "object") {
+    return "";
   }
 
-  const thread = runtime.clients.codex.startThread({
-    model: runtime.providerConfig.openai.model,
-    approvalPolicy: "never",
-    sandboxMode: "read-only",
-    workingDirectory: process.cwd(),
-    skipGitRepoCheck: true,
-    webSearchMode: "disabled"
+  if (
+    typeof responsePayload.output_text === "string" &&
+    responsePayload.output_text.trim().length > 0
+  ) {
+    return responsePayload.output_text.trim();
+  }
+
+  if (!Array.isArray(responsePayload.output)) {
+    return "";
+  }
+
+  const textParts = [];
+  for (const item of responsePayload.output) {
+    if (item?.type !== "message" || !Array.isArray(item.content)) {
+      continue;
+    }
+
+    for (const contentItem of item.content) {
+      const maybeText =
+        contentItem?.type === "output_text" || contentItem?.type === "text"
+          ? contentItem.text
+          : null;
+
+      if (typeof maybeText === "string" && maybeText.trim().length > 0) {
+        textParts.push(maybeText.trim());
+      }
+    }
+  }
+
+  return textParts.join("\n\n").trim();
+}
+
+async function callOpenAI(message, history, screenshot, runtime) {
+  const userContent = [
+    {
+      type: "input_text",
+      text: toOpenAIPrompt(history, message, Boolean(screenshot))
+    }
+  ];
+
+  if (screenshot) {
+    userContent.push({
+      type: "input_image",
+      image_url: `data:${screenshot.mimeType};base64,${screenshot.base64}`
+    });
+  }
+
+  const response = await fetch(getOpenAIResponsesUrl(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: runtime.providerConfig.openai.model,
+      input: [
+        {
+          role: "user",
+          content: userContent
+        }
+      ]
+    })
   });
 
-  const codexInput = screenshotFilePath
-    ? [
-        { type: "text", text: toCodexPrompt(history, message, true) },
-        { type: "local_image", path: screenshotFilePath }
-      ]
-    : toCodexPrompt(history, message, false);
+  const responsePayload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const upstreamMessage =
+      typeof responsePayload?.error?.message === "string"
+        ? responsePayload.error.message
+        : `OpenAI request failed with status ${response.status}.`;
 
-  try {
-    const turn = await thread.run(codexInput);
-
-    if (typeof turn.finalResponse === "string" && turn.finalResponse.trim()) {
-      return turn.finalResponse.trim();
-    }
-
-    const latestAgentMessage = [...turn.items]
-      .reverse()
-      .find((item) => item.type === "agent_message");
-
-    if (
-      latestAgentMessage &&
-      typeof latestAgentMessage.text === "string" &&
-      latestAgentMessage.text.trim()
-    ) {
-      return latestAgentMessage.text.trim();
-    }
-
-    return "";
-  } finally {
-    if (screenshotFilePath) {
-      await fs.unlink(screenshotFilePath).catch(() => {});
-    }
+    throw new Error(upstreamMessage);
   }
+
+  return extractOpenAIText(responsePayload);
 }
 
 async function callAnthropic(message, history, screenshot, runtime) {
@@ -367,7 +370,7 @@ export async function chatHandler(req, res) {
     if (selectedProvider === "anthropic") {
       responseText = await callAnthropic(message.trim(), history, parsedScreenshot, runtime);
     } else {
-      responseText = await callCodex(message.trim(), history, parsedScreenshot, runtime);
+      responseText = await callOpenAI(message.trim(), history, parsedScreenshot, runtime);
     }
 
     sendJson(res, 200, {
