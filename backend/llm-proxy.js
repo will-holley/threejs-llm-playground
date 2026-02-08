@@ -161,7 +161,12 @@ function getOpenAIResponsesUrl() {
       ? process.env.OPENAI_BASE_URL.trim()
       : DEFAULT_OPENAI_BASE_URL;
 
-  return `${configuredBaseUrl.replace(/\/+$/, "")}/v1/responses`;
+  const normalizedBaseUrl = configuredBaseUrl.replace(/\/+$/, "");
+  if (normalizedBaseUrl.endsWith("/v1")) {
+    return `${normalizedBaseUrl}/responses`;
+  }
+
+  return `${normalizedBaseUrl}/v1/responses`;
 }
 
 function extractOpenAIText(responsePayload) {
