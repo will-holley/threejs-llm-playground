@@ -31,7 +31,7 @@ pnpm dev
 ```
 
 Open `http://localhost:4000`.
-Backend changes to `server.js` are hot reloaded automatically in dev mode.
+Backend changes under `server.js`, `backend/`, and `api/` are hot reloaded automatically in dev mode.
 
 ## Usage
 
@@ -87,3 +87,12 @@ pnpm preview
 ```
 
 This serves static files from `dist/` plus API routes.
+
+## Vercel Deployment
+
+- Frontend is built by Vite from `dist/`.
+- API endpoints are exposed through Vercel Functions in `api/chat.js` and `api/providers.js`.
+- Set environment variables in Vercel Preview and Production:
+  - `ANTHROPIC_API_KEY`
+  - `OPENAI_API_KEY`
+  - `OPENAI_BASE_URL` (optional)
